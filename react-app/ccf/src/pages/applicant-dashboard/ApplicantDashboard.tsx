@@ -5,8 +5,6 @@ import {
   FaArrowUp,
   FaFileAlt,
   FaArrowRight,
-  FaCheckCircle,
-  FaEye,
 } from "react-icons/fa";
 import logo from "../../assets/ccf-logo.png";
 import Button from "../../components/buttons/Button";
@@ -20,6 +18,7 @@ import {
   getApplicantSidebarItems,
   SideBarTypes,
 } from "../../types/sidebar-types";
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import {
   getUsersCurrentCycleAppplications,
   getUsersAllApplications,
@@ -40,6 +39,7 @@ import ApplicationCycle from "../../types/applicationCycle-types";
 import { auth } from "../../index";
 import { PostGrantReport } from "../../types/post-grant-report-types";
 import { getPDFDownloadURL } from "../../storage/storage";
+import { db } from '../../index';
 
 type ApplicationWithDecision = Application & {
   isAccepted?: boolean;
@@ -177,6 +177,24 @@ function ApplicantUsersDashboard(): JSX.Element {
       setAllCycleAcceptedApplications(accepted);
     };
 
+    const fetchDraftApplications = async () => {
+      const user = auth.currentUser; 
+      if (!user) return; 
+
+      const draftsQuery = query(
+        collection(db, 'applications'),
+        where('creatorId', '==', user.uid), 
+        where('status', '==', 'draft')
+      );
+      const draftsSnapshot = await getDocs(draftsQuery);
+      const drafts = draftsSnapshot.docs.map(d => ({
+        id: d.id, 
+        ...d.data()
+      })) as unknown as Application[];
+
+      setInProgressApplications(drafts);
+    }
+
     const initializeData = async () => {
       try {
         setLoading(true);
@@ -208,6 +226,7 @@ function ApplicantUsersDashboard(): JSX.Element {
         await Promise.all([
           fetchApplicationData(),
           fetchAllCyclePostGrantData(),
+          fetchDraftApplications(),
         ]);
       } catch (error) {
         console.error("Error initializing dashboard:", error);
@@ -299,46 +318,19 @@ function ApplicantUsersDashboard(): JSX.Element {
             <Banner>ALERT: Applications Are Closed for this Year</Banner>
           )}
 
-          {/* Post-Grant Reports Section - always visible for accepted applications */}
-          {allCycleAcceptedApplications.length > 0 && (
+          {/* Post-Grant Reports Section - only shows applications pending a report */}
+          {allCycleAcceptedApplications.filter((a) => !a.hasReportSubmitted).length > 0 && (
             <div className="post-grant-reports-section">
               <div className="post-grant-reports-header">
                 <h2>📋 Post-Grant Reports</h2>
-                <p>
-                  You have {allCycleAcceptedApplications.length} accepted
-                  application
-                  {allCycleAcceptedApplications.length > 1 ? "s" : ""}.
-                </p>
-                {allCycleAcceptedApplications.filter(
-                  (a) => !a.hasReportSubmitted,
-                ).length > 0 && (
+                {(() => {
+                  const pending = allCycleAcceptedApplications.filter((a) => !a.hasReportSubmitted);
+                  return (
                     <p>
-                      {
-                        allCycleAcceptedApplications.filter(
-                          (a) => !a.hasReportSubmitted,
-                        ).length
-                      }{" "}
-                      application
-                      {allCycleAcceptedApplications.filter(
-                        (a) => !a.hasReportSubmitted,
-                      ).length > 1
-                        ? "s"
-                        : ""}{" "}
-                      require
-                      {allCycleAcceptedApplications.filter(
-                        (a) => !a.hasReportSubmitted,
-                      ).length > 1
-                        ? ""
-                        : "s"}{" "}
-                      post-grant report
-                      {allCycleAcceptedApplications.filter(
-                        (a) => !a.hasReportSubmitted,
-                      ).length > 1
-                        ? "s"
-                        : ""}
-                      .
+                      {pending.length} application{pending.length > 1 ? "s" : ""} require{pending.length > 1 ? "" : "s"} a post-grant report{pending.length > 1 ? "s" : ""}.
                     </p>
-                  )}
+                  );
+                })()}
                 {appCycle?.postGrantReportDeadline &&
                   allCycleAcceptedApplications.some(
                     (a) =>
@@ -360,27 +352,17 @@ function ApplicantUsersDashboard(): JSX.Element {
                   )}
               </div>
               <div className="post-grant-reports-list">
-                {allCycleAcceptedApplications.map((application, index) => (
-                  <div key={index} className="post-grant-report-item">
-                    <div className="report-item-info">
-                      <FaFileAlt className="report-icon" />
-                      <span className="report-title">
-                        {(application as any).title ||
-                          `${firstLetterCap((application as any).grantType)} Application`}
-                      </span>
-                    </div>
-                    {application.hasReportSubmitted ? (
-                      <button
-                        className="post-grant-report-btn submitted"
-                        onClick={() =>
-                          navigate(
-                            `/applicant/post-grant-report/${(application as any).id}`,
-                          )
-                        }
-                      >
-                        View Submitted Report ✓
-                      </button>
-                    ) : (
+                {allCycleAcceptedApplications
+                  .filter((a) => !a.hasReportSubmitted)
+                  .map((application, index) => (
+                    <div key={index} className="post-grant-report-item">
+                      <div className="report-item-info">
+                        <FaFileAlt className="report-icon" />
+                        <span className="report-title">
+                          {(application as any).title ||
+                            `${firstLetterCap((application as any).grantType)} Application`}
+                        </span>
+                      </div>
                       <button
                         className="post-grant-report-btn"
                         onClick={() =>
@@ -391,9 +373,8 @@ function ApplicantUsersDashboard(): JSX.Element {
                       >
                         Submit Report
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
               </div>
             </div>
           )}
@@ -425,13 +406,22 @@ function ApplicantUsersDashboard(): JSX.Element {
                             <div
                               key={index}
                               className="ApplicantDashboard-single-application-box"
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                const route = application.grantType === 'nonresearch'
+                                  ? '/applicant/application-form/nonresearch'
+                                  : application.grantType === 'nextgen'
+                                  ? '/applicant/application-form/nextgen'
+                                  : '/applicant/application-form/research';
+                                navigate(`${route}?draftId=${application.id}`);
+                              }}
                             >
                               <div className="application-info">
                                 <FaFileAlt className="application-icon" />
-                                <p>{application.applicationType}</p>
+                                <p>{firstLetterCap(application.grantType)} - Draft</p>
                               </div>
                               <div className="ApplicantDashboard-application-status">
-                                <p>{application.status}</p>
+                                <p>In Progress</p>
                                 <FaArrowRight className="application-status-icon" />
                               </div>
                             </div>
