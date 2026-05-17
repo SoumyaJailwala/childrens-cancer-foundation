@@ -23,6 +23,8 @@ export const addApplicantUser = async (userData: UserData, password: string): Pr
     });
     const addApplicantRole = httpsCallable(functions, "addApplicantRole");
     await addApplicantRole({ email: userData.email });
+    // Force token refresh so the new role claim is immediately active
+    await user.getIdToken(true);
   } catch (e) {
     if (user !== null) {
       await deleteUser(user);
