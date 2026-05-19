@@ -22,7 +22,9 @@ service cloud.firestore {
     // Applications collection rules
     match /applications/{applicationId} {
       allow read: if isAdmin() || isReviewer() || (isApplicant() && request.auth.uid == resource.data.creatorId);
-      allow write: if isAdmin();
+      allow create: if isAdmin() || (isApplicant() && request.resource.data.creatorId == request.auth.uid);
+      allow update: if isAdmin() || (isApplicant() && resource.data.creatorId == request.auth.uid && resource.data.status == 'draft');
+      allow delete: if isAdmin();
     }
     
     // FAQs collection rules
@@ -55,7 +57,7 @@ service cloud.firestore {
     
     // Decision Data
     match /decision-data/{decisionId} {
-      allow read: if isAdmin() || isReviewer() || (isApplicant() && request.auth.uid == get(/databases/$(database)/documents/applications/$(resource.data.applicationId)).data.creatorId);
+      allow read: if isAdmin() || isReviewer() || (isApplicant() && request.auth.uid == get(/databases/$(database)/documents/applications/$(decisionId)).data.creatorId);
       allow write: if isAdmin();
     }
     
@@ -79,7 +81,7 @@ service cloud.firestore {
     
     // Reviewer Whitelist
     match /reviewer-whitelist/{whitelistId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if isAdmin();
     }
     
